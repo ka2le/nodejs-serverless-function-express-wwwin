@@ -14,30 +14,52 @@ try {
       }),
       databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
     });
+    console.log('Firebase admin initialized successfully.');
   }
 } catch (error) {
   console.error('Firebase admin initialization error:', error);
 }
 
+// Verify that environment variables are loaded correctly
+console.log('Environment Variables:');
+console.log('FIREBASE_PROJECT_ID:', process.env.FIREBASE_PROJECT_ID);
+console.log('FIREBASE_PRIVATE_KEY:', process.env.FIREBASE_PRIVATE_KEY ? 'Loaded' : 'Not Loaded');
+console.log('FIREBASE_CLIENT_EMAIL:', process.env.FIREBASE_CLIENT_EMAIL);
+
 const db = admin.firestore();
 
 // Define allowed origins
 const allowedOrigins = [
-  'http://localhost:3000', // Local IP for testing
-  'https://ka2le.github.io' // Replace with your GitHub static page URL
+  'http://localhost:3000', // Local React app
+  'http://localhost:3001', // Local React app
+  'https://ka2le.github.io', // Replace with your GitHub static page URL
 ];
+
+// Toggle CORS flag
+const temporarilyDisableCors = false;
 
 // CORS configuration
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+  origin: temporarilyDisableCors ? true : function (origin, callback) {
+    console.log('Origin:', origin);
+    if (!origin) return callback(new Error('Origin not allowed by CORS'));
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
       return callback(new Error(msg), false);
     }
     return callback(null, true);
   }
+};
+
+// Middleware to check Referer header
+const refererCheck = (req, res, next) => {
+  const referer = req.headers.referer;
+  console.log('Referer:', referer);
+  if ((!referer || !allowedOrigins.some(origin => referer.startsWith(origin))) && (!temporarilyDisableCors)) {
+    res.status(403).send({ error: 'Access denied' });
+    return;
+  }
+  next();
 };
 
 const handler = async (req, res) => {
@@ -66,12 +88,15 @@ const handler = async (req, res) => {
       }
       const doc = await db.collection('games').doc(gameId).get();
       if (doc.exists) {
+        console.log('Game state retrieved successfully:', doc.data());
         res.status(200).send(doc.data());
       } else {
+        console.log('Game not found for gameId:', gameId);
         res.status(404).send({ error: 'Game not found' });
       }
     } catch (error) {
       console.error('Error retrieving game state:', error);
+      console.error('Error stack trace:', error.stack);
       res.status(500).send({ error: 'Failed to retrieve game state', details: error.message });
     }
   } else {
@@ -87,6 +112,8 @@ module.exports = (req, res) => {
       res.status(500).send({ error: 'CORS error', details: err.message });
       return;
     }
-    handler(req, res);
+    refererCheck(req, res, () => {
+      handler(req, res);
+    });
   });
 };
